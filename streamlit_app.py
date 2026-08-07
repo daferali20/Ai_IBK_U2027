@@ -71,12 +71,13 @@ except ImportError:
     UI_AVAILABLE = False
 
 # استيراد الـ Broker
+# استيراد الـ Broker بأمان
 try:
-    from brokers.ibkr_broker import IBKRBroker
-    from brokers.base_broker import MockBroker
+    from brokers import IBKRBroker, MockBroker
     BROKER_AVAILABLE = True
 except ImportError:
     BROKER_AVAILABLE = False
+    # تعريف MockBroker محلياً
     class MockBroker:
         def connect(self, *args): return True, ""
         def disconnect(self): pass
