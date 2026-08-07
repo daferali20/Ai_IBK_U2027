@@ -5,6 +5,7 @@ import sys
 import asyncio
 import warnings
 import yfinance as yf
+
 # إنشاء Event Loop وضبطه للـ Policy مباشرة قبل أي import
 try:
     loop = asyncio.get_running_loop()
@@ -59,7 +60,7 @@ except ImportError:
 # إعدادات Streamlit
 # ==========================================
 st.set_page_config(
-    page_title="AI Trading Bot (IBKR)",
+    page_title="AI Trading Bot (IBKR & Yahoo)",
     page_icon="🤖",
     layout="wide"
 )
@@ -95,7 +96,7 @@ def remove_from_watchlist(symbol):
     return False
 
 # ==========================================
-# دوال IBKR المعدلة بأمان للـ Threading
+# دالة جلب البيانات من Yahoo Finance
 # ==========================================
 
 def get_market_data(symbol, period="5d", interval="5m"):
@@ -103,14 +104,12 @@ def get_market_data(symbol, period="5d", interval="5m"):
     try:
         print(f"🔄 جلب بيانات {symbol} من Yahoo Finance...")
         
-        # تحميل البيانات مباشرة
         ticker = yf.Ticker(symbol)
         df = ticker.history(period=period, interval=interval)
         
         if df.empty:
             return None, f"❌ لا توجد بيانات للرمز: {symbol}"
         
-        # توحيد أسماء الأعمدة لتتناسب مع باقي الكود (أحرف صغيرة)
         df.rename(columns={
             'Open': 'open',
             'High': 'high',
@@ -119,7 +118,6 @@ def get_market_data(symbol, period="5d", interval="5m"):
             'Volume': 'volume'
         }, inplace=True)
         
-        # إعداد عمود التاريخ
         df['date'] = df.index
         
         # حساب المؤشرات الفنية
@@ -128,7 +126,6 @@ def get_market_data(symbol, period="5d", interval="5m"):
         df['SMA_50'] = ta.trend.sma_indicator(df['close'], window=50)
         df['volume_ma'] = ta.trend.sma_indicator(df['volume'], window=10)
         
-        # حذف الصفوف التي تحتوي على قيم فارغة بسبب حساب المتوسطات
         df.dropna(subset=['RSI', 'SMA_20'], inplace=True)
         
         return df, None
@@ -137,7 +134,32 @@ def get_market_data(symbol, period="5d", interval="5m"):
         return None, f"❌ خطأ أثناء جلب البيانات من ياهو: {str(e)}"
 
 # ==========================================
-# دوال التحليل الرسم البياني
+# دالة تنفيذ الأوامر عبر IBKR
+# ==========================================
+
+def execute_ib_order(action, symbol, quantity, host, port):
+    """تنفيذ أمر التداول عبر IBKR بأمان"""
+    ib = IB()
+    try:
+        client_id = random.randint(1000, 9999)
+        ib.connect(host, port, clientId=client_id, timeout=5)
+        
+        contract = Stock(symbol, 'SMART', 'USD')
+        ib.qualifyContracts(contract)
+        
+        order = MarketOrder(action, quantity)
+        trade = ib.placeOrder(contract, order)
+        
+        ib.sleep(1)
+        ib.disconnect()
+        return f"✅ تم إرسال أمر {action} لعدد {quantity} سهم من {symbol} بنجاح!"
+    except Exception as e:
+        if ib.isConnected():
+            ib.disconnect()
+        return f"❌ فشل تنفيذ الأمر عبر IBKR: {str(e)}"
+
+# ==========================================
+# دوال التحليل والـ Plotly
 # ==========================================
 
 def analyze_with_local_ai(df):
@@ -214,8 +236,7 @@ def plot_chart(df, symbol_name):
 # ==========================================
 
 def main():
-    st.title("🤖 بوت التداول بالذكاء الاصطناعي (IBKR)")
-    st.info("💡 تأكد من تشغيل TWS أو IB Gateway مع تمكين API")
+    st.title("🤖 بوت التداول بالذكاء الاصطناعي (Yahoo & IBKR)")
     
     if 'ai_engine' not in st.session_state:
         st.session_state['ai_engine'] = LocalAITradingEngine()
@@ -259,9 +280,15 @@ def main():
         st.caption(f"📊 عدد الأسهم في المفضلة: {len(watchlist)}")
         st.divider()
         
-        api_key = st.text_input("OpenAI API Key (اختياري)", type="password")
+        st.subheader("⏱️ إعدادات البيانات")
+        selected_period = st.selectbox("الفترة الزمنية:", options=["1d", "5d", "1mo", "3mo"], index=1)
+        selected_interval = st.selectbox("حجم الشمعة:", options=["1m", "2m", "5m", "15m", "60m", "1d"], index=2)
+        
+        st.divider()
+        st.subheader("🔌 إعدادات IBKR للتنفيذ")
         ib_host = st.text_input("IB Host", DEFAULT_HOST)
         ib_port = st.number_input("IB Port", value=DEFAULT_PORT)
+        api_key = st.text_input("OpenAI API Key (اختياري)", type="password")
         
         symbol = st.session_state.get('selected_symbol', current_symbol)
         quantity = st.number_input("الكمية", value=DEFAULT_QUANTITY, step=1)
@@ -279,12 +306,12 @@ def main():
     col1, col2 = st.columns([1.5, 1])
     
     with col1:
-        st.subheader("📊 البيانات الفنية")
+        st.subheader("📊 البيانات الفنية (Yahoo Finance)")
         st.info(f"📌 السهم الحالي: **{symbol}**")
         
         if st.button("🔄 جلب البيانات", use_container_width=True):
-            with st.spinner("جاري الاتصال بـ IBKR..."):
-                df, error = get_market_data(symbol, ib_host, ib_port)
+            with st.spinner("جاري جلب البيانات من Yahoo Finance..."):
+                df, error = get_market_data(symbol, period=selected_period, interval=selected_interval)
                 if error:
                     st.error(error)
                 else:
@@ -354,7 +381,7 @@ def main():
             st.text_area("التفاصيل:", st.session_state['result'], height=150)
             
             st.divider()
-            st.subheader("💼 التنفيذ")
+            st.subheader("💼 التنفيذ (عبر IBKR)")
             
             if action == "BUY":
                 if st.button(f"🚀 شراء {quantity} سهم", use_container_width=True, type="primary"):
