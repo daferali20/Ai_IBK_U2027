@@ -1,39 +1,48 @@
-import random
+# brokers/ibkr_broker.py
+"""
+وسيط Interactive Brokers (IBKR)
+"""
 
-class IBKRBroker:
-    def __init__(self, host='127.0.0.1', port=7497):
+import random
+import time
+from typing import Optional, Tuple, Dict, Any
+from .base_broker import BaseBroker
+
+class IBKRBroker(BaseBroker):
+    """
+    وسيط IBKR لتداول الأسهم
+    يستخدم ib_insync أو ib_async
+    """
+    
+    def __init__(self, host='127.0.0.1', port=7497, client_id=1):
+        """
+        تهيئة وسيط IBKR
+        
+        Args:
+            host: عنوان الخادم
+            port: المنفذ (7497 للتجريبي، 7496 للحقيقي)
+            client_id: معرف العميل
+        """
         self.host = host
         self.port = port
-        self.connected = False
+        self.client_id = client_id
+        self.ib = None
+        self._connected = False
+        self._available = False
+        self._init_ib()
     
-    def connect(self):
+    def _init_ib(self):
+        """تهيئة مكتبة IBKR"""
         try:
-            # محاولة استيراد IBKR
-            from ib_insync import IB, Stock, MarketOrder
-            self.ib = IB()
-            self.ib.connect(self.host, int(self.port), clientId=random.randint(1000, 9999))
-            self.connected = True
-            return True, "✅ تم الاتصال بـ IBKR"
+            # محاولة استخدام ib_insync
+            from ib_insync import IB, Stock, MarketOrder, util
+            self.IB = IB
+            self.Stock = Stock
+            self.MarketOrder = MarketOrder
+            self.util = util
+            self._available = True
+            self._lib = 'ib_insync'
         except ImportError:
-            return False, "⚠️ IBKR غير مثبت"
-        except Exception as e:
-            return False, f"❌ فشل الاتصال: {e}"
-    
-    def place_order(self, action, symbol, quantity):
-        if not self.connected:
-            return "⚠️ غير متصل بـ IBKR"
-        
-        try:
-            from ib_insync import Stock, MarketOrder
-            contract = Stock(symbol, 'SMART', 'USD')
-            order = MarketOrder(action, quantity)
-            trade = self.ib.placeOrder(contract, order)
-            self.ib.sleep(1)
-            return f"✅ تم إرسال أمر {action} لـ {quantity} سهم"
-        except Exception as e:
-            return f"❌ فشل: {e}"
-    
-    def disconnect(self):
-        if self.connected:
-            self.ib.disconnect()
-            self.connected = False
+            try:
+                # محاولة استخدام ib_async
+                from ib_async import IB, Stock, MarketOrder, util
