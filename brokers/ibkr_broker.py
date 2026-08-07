@@ -1,65 +1,39 @@
-# brokers/ibkr_broker.py
-from ib_insync import IB, Stock, util, MarketOrder
-from .base_broker import BaseBroker
+import random
 
-class IBKRBroker(BaseBroker):
-    """وسيط IBKR"""
-    
-    def __init__(self, host='127.0.0.1', port=7497, client_id=1):
+class IBKRBroker:
+    def __init__(self, host='127.0.0.1', port=7497):
         self.host = host
         self.port = port
-        self.client_id = client_id
-        self.ib = None
         self.connected = False
     
     def connect(self):
-        """الاتصال بـ IBKR"""
-        self.ib = IB()
         try:
-            self.ib.connect(self.host, int(self.port), clientId=self.client_id)
+            # محاولة استيراد IBKR
+            from ib_insync import IB, Stock, MarketOrder
+            self.ib = IB()
+            self.ib.connect(self.host, int(self.port), clientId=random.randint(1000, 9999))
             self.connected = True
-            print(f"✅ تم الاتصال بـ IBKR على {self.host}:{self.port}")
-            return True
+            return True, "✅ تم الاتصال بـ IBKR"
+        except ImportError:
+            return False, "⚠️ IBKR غير مثبت"
         except Exception as e:
-            print(f"❌ فشل الاتصال: {e}")
-            return False
-    
-    def disconnect(self):
-        """قطع الاتصال"""
-        if self.connected and self.ib:
-            self.ib.disconnect()
-            self.connected = False
-            print("✅ تم قطع الاتصال بـ IBKR")
-    
-    def get_historical_data(self, symbol, duration='2 D', bar_size='5 mins'):
-        """جلب البيانات التاريخية"""
-        if not self.connected:
-            self.connect()
-        
-        contract = Stock(symbol, 'SMART', 'USD')
-        bars = self.ib.reqHistoricalData(
-            contract,
-            endDateTime='',
-            durationStr=duration,
-            barSizeSetting=bar_size,
-            whatToShow='TRADES',
-            useRTH=True
-        )
-        return util.df(bars)
+            return False, f"❌ فشل الاتصال: {e}"
     
     def place_order(self, action, symbol, quantity):
-        """تنفيذ أمر تداول"""
         if not self.connected:
-            self.connect()
+            return "⚠️ غير متصل بـ IBKR"
         
-        contract = Stock(symbol, 'SMART', 'USD')
-        order = MarketOrder(action, quantity)
-        trade = self.ib.placeOrder(contract, order)
-        self.ib.sleep(2)
-        return trade.orderStatus.status
+        try:
+            from ib_insync import Stock, MarketOrder
+            contract = Stock(symbol, 'SMART', 'USD')
+            order = MarketOrder(action, quantity)
+            trade = self.ib.placeOrder(contract, order)
+            self.ib.sleep(1)
+            return f"✅ تم إرسال أمر {action} لـ {quantity} سهم"
+        except Exception as e:
+            return f"❌ فشل: {e}"
     
-    def get_account_info(self):
-        """جلب معلومات الحساب"""
-        if not self.connected:
-            self.connect()
-        return self.ib.managedAccounts()
+    def disconnect(self):
+        if self.connected:
+            self.ib.disconnect()
+            self.connected = False
