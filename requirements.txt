@@ -12,3 +12,4 @@ xgboost
 lightgbm
 joblib
 yfinance
+asyncio
