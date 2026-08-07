@@ -1,3 +1,4 @@
+# app.py
 # ==========================================
 # حل مشكلة event loop
 # ==========================================
@@ -5,13 +6,11 @@ import asyncio
 import nest_asyncio
 import warnings
 
-# تطبيق nest_asyncio
 try:
     nest_asyncio.apply()
 except:
     pass
 
-# إنشاء event loop
 try:
     loop = asyncio.get_event_loop()
 except RuntimeError:
@@ -25,240 +24,226 @@ warnings.filterwarnings('ignore')
 # ==========================================
 import streamlit as st
 import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import yfinance as yf
-import ta
-import time
-
-# ==========================================
-# نموذج الذكاء الاصطناعي (مدمج)
-# ==========================================
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
-
-class LocalAITradingEngine:
-    def __init__(self):
-        self.model = RandomForestClassifier(n_estimators=100, random_state=42)
-        self.is_trained = False
-        
-    def train_quick_model(self, df):
-        try:
-            df = df.copy()
-            df['returns'] = df['close'].pct_change()
-            df['volatility'] = df['returns'].rolling(10).std()
-            df['target'] = np.where(df['close'].shift(-1) > df['close'], 1, 0)
-            
-            features = ['returns', 'volatility']
-            df = df.dropna()
-            
-            if len(df) < 20:
-                return False
-            
-            X = df[features][:-1]
-            y = df['target'][:-1]
-            
-            self.model.fit(X, y)
-            self.is_trained = True
-            return True
-        except:
-            return False
-    
-    def predict_opportunity(self, df):
-        try:
-            df = df.copy()
-            df['returns'] = df['close'].pct_change()
-            df['volatility'] = df['returns'].rolling(10).std()
-            df = df.dropna()
-            
-            if df.empty or not self.is_trained:
-                return 'HOLD', 50, "بيانات غير كافية"
-            
-            latest = df.iloc[-1]
-            features = np.array([[latest['returns'], latest['volatility']]])
-            
-            prob = self.model.predict_proba(features)[0][1]
-            confidence = round(prob * 100, 1)
-            
-            if prob > 0.6:
-                return 'BUY', confidence, "إشارة شراء"
-            elif prob < 0.4:
-                return 'SELL', confidence, "إشارة بيع"
-            else:
-                return 'HOLD', confidence, "انتظار"
-        except:
-            return 'HOLD', 50, "خطأ في التنبؤ"
-
-# ==========================================
-# دوال جلب البيانات
-# ==========================================
-def get_market_data(symbol, period="5d", interval="5m"):
-    try:
-        ticker = yf.Ticker(symbol)
-        df = ticker.history(period=period, interval=interval)
-        
-        if df.empty:
-            return None, f"لا توجد بيانات لـ {symbol}"
-        
-        df.rename(columns={
-            'Open': 'open', 'High': 'high', 'Low': 'low',
-            'Close': 'close', 'Volume': 'volume'
-        }, inplace=True)
-        
-        df.index = df.index.tz_localize(None)
-        df['date'] = df.index
-        
-        # مؤشرات فنية
-        df['RSI'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
-        df['SMA_20'] = ta.trend.sma_indicator(df['close'], window=20)
-        df['SMA_50'] = ta.trend.sma_indicator(df['close'], window=50)
-        df.dropna(inplace=True)
-        
-        return df, None
-    except Exception as e:
-        return None, str(e)
-
-# ==========================================
-# دوال الرسم البياني
-# ==========================================
-def plot_chart(df, symbol):
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
-                        vertical_spacing=0.05, row_heights=[0.7, 0.3])
-    
-    fig.add_trace(go.Candlestick(
-        x=df['date'], open=df['open'], high=df['high'],
-        low=df['low'], close=df['close'], name='Price'
-    ), row=1, col=1)
-    
-    fig.add_trace(go.Scatter(x=df['date'], y=df['SMA_20'],
-                  mode='lines', name='SMA 20', line=dict(color='orange')), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df['date'], y=df['SMA_50'],
-                  mode='lines', name='SMA 50', line=dict(color='cyan')), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df['date'], y=df['RSI'],
-                  mode='lines', name='RSI', line=dict(color='purple')), row=2, col=1)
-    fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-    fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
-    
-    fig.update_layout(height=500, template='plotly_dark', showlegend=True,
-                      xaxis_rangeslider_visible=False)
-    return fig
+from core.config import config
+from models.base_model import LocalAITradingEngine
+from data.fetcher import DataFetcher
+from ui.charts import ChartBuilder
+from ui.sidebar import Sidebar
+from brokers.ibkr_broker import IBKRBroker
 
 # ==========================================
 # إعدادات الصفحة
 # ==========================================
-st.set_page_config(page_title="AI Trading Bot", page_icon="🤖", layout="wide")
+st.set_page_config(
+    page_title=config.APP_TITLE,
+    page_icon=config.APP_ICON,
+    layout=config.APP_LAYOUT,
+    initial_sidebar_state="expanded"
+)
 
 # ==========================================
-# القوائم
+# تهيئة المحرك
 # ==========================================
-DEFAULT_WATCHLIST = ["AAPL", "GOOGL", "MSFT", "AMZN", "TSLA", "NVDA", "META"]
+if 'engine' not in st.session_state:
+    st.session_state['engine'] = LocalAITradingEngine()
+
+engine = st.session_state['engine']
 
 # ==========================================
 # التطبيق الرئيسي
 # ==========================================
 def main():
-    st.title("🤖 AI Trading Bot (Yahoo Finance)")
-    
-    # تهيئة المحرك
-    if 'engine' not in st.session_state:
-        st.session_state['engine'] = LocalAITradingEngine()
-    
-    if 'watchlist' not in st.session_state:
-        st.session_state['watchlist'] = DEFAULT_WATCHLIST.copy()
-    
-    engine = st.session_state['engine']
+    st.title(config.APP_TITLE)
+    st.caption("📊 بوت تداول بالذكاء الاصطناعي مع Yahoo Finance و IBKR")
     
     # ===== الشريط الجانبي =====
-    with st.sidebar:
-        st.header("⚙️ Settings")
-        
-        symbol = st.selectbox("Select Symbol:", st.session_state['watchlist'])
-        
-        new_symbol = st.text_input("Add Symbol:", placeholder="AAPL")
-        if st.button("➕ Add"):
-            if new_symbol and new_symbol.upper() not in st.session_state['watchlist']:
-                st.session_state['watchlist'].append(new_symbol.upper())
-                st.rerun()
-        
-        period = st.selectbox("Period:", ["5d", "1mo", "3mo"], index=0)
-        interval = st.selectbox("Interval:", ["5m", "15m", "60m"], index=0)
-        quantity = st.number_input("Quantity", value=10, step=1)
-        
-        st.divider()
-        if engine.is_trained:
-            st.success("✅ Model Ready")
-        else:
-            st.warning("⚠️ Not Trained")
+    settings = Sidebar.render(engine)
     
-    # ===== الأعمدة =====
-    col1, col2 = st.columns([1.5, 1])
+    symbol = settings['symbol']
+    period = settings['period']
+    interval = settings['interval']
+    quantity = settings['quantity']
     
+    # ===== الأعمدة الرئيسية =====
+    col1, col2 = st.columns([1.6, 1])
+    
+    # ===== العمود الأول: البيانات =====
     with col1:
-        st.subheader("📊 Market Data")
+        st.subheader("📊 البيانات والتحليل الفني")
+        st.info(f"📌 السهم النشط: **{symbol}**")
         
-        if st.button("🔄 Fetch Data", use_container_width=True):
-            with st.spinner(f"Fetching {symbol}..."):
-                df, error = get_market_data(symbol, period, interval)
+        if st.button("🔄 جلب بيانات السوق", use_container_width=True):
+            with st.spinner(f"جاري جلب بيانات {symbol}..."):
+                df, error = DataFetcher.get_stock_data(symbol, period, interval)
+                
                 if error:
                     st.error(f"❌ {error}")
                 else:
                     st.session_state['df'] = df
-                    if engine.train_quick_model(df):
-                        st.success("✅ Model trained successfully!")
-                    st.success(f"✅ {len(df)} candles loaded")
+                    result, message = engine.train(df)
+                    if result:
+                        st.success(f"✅ {message}")
+                    else:
+                        st.warning(f"⚠️ {message}")
+                    
+                    st.success(f"✅ تم تحديث {len(df)} شمعة")
         
         if 'df' in st.session_state:
             df = st.session_state['df']
             
+            # عرض السعر الحالي
             last_price = df['close'].iloc[-1]
-            change = ((df['close'].iloc[-1] - df['close'].iloc[-2]) / df['close'].iloc[-2]) * 100 if len(df) > 1 else 0
-            st.metric("Current Price", f"${last_price:.2f}", f"{change:+.2f}%")
+            prev_price = df['close'].iloc[-2] if len(df) > 1 else last_price
+            change = ((last_price - prev_price) / prev_price) * 100 if prev_price != 0 else 0
             
-            fig = plot_chart(df, symbol)
+            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+            with col_m1:
+                st.metric("💰 السعر", f"${last_price:.2f}", f"{change:+.2f}%")
+            with col_m2:
+                st.metric("📊 RSI", f"{df['RSI'].iloc[-1]:.1f}")
+            with col_m3:
+                st.metric("📈 SMA 20", f"${df['SMA_20'].iloc[-1]:.2f}")
+            with col_m4:
+                st.metric("📉 SMA 50", f"${df['SMA_50'].iloc[-1]:.2f}")
+            
+            # الرسم البياني
+            fig = ChartBuilder.create_candlestick_chart(df, symbol)
             st.plotly_chart(fig, use_container_width=True)
             
-            with st.expander("📋 Data Preview"):
-                st.dataframe(df.tail(10))
+            # عرض الإشارة الفورية
+            if engine.is_trained:
+                action, confidence, reason = engine.predict(df)
+                st.info(f"🚦 **إشارة فورية:** {ChartBuilder.display_signal(action, confidence)}")
+                st.caption(f"📝 {reason}")
+            
+            # عرض البيانات
+            with st.expander("📋 معاينة البيانات"):
+                cols = ['date', 'open', 'high', 'low', 'close', 'volume', 'RSI', 'SMA_20', 'SMA_50']
+                st.dataframe(
+                    df[cols].tail(10).style.format({
+                        'close': '${:.2f}',
+                        'open': '${:.2f}',
+                        'high': '${:.2f}',
+                        'low': '${:.2f}',
+                        'volume': '{:,.0f}',
+                        'RSI': '{:.1f}',
+                        'SMA_20': '${:.2f}',
+                        'SMA_50': '${:.2f}'
+                    }),
+                    use_container_width=True
+                )
     
+    # ===== العمود الثاني: التحليل والتنفيذ =====
     with col2:
-        st.subheader("🤖 AI Analysis")
+        st.subheader("🤖 التحليل والتنفيذ")
         
-        if st.button("🧠 Analyze", use_container_width=True, type="primary"):
+        if st.button("🧠 تحليل الفرصة", use_container_width=True, type="primary"):
             if 'df' not in st.session_state:
-                st.warning("⚠️ Fetch data first")
+                st.warning("⚠️ يرجى جلب البيانات أولاً")
             else:
                 df = st.session_state['df']
-                action, confidence, reason = engine.predict_opportunity(df)
-                st.session_state['action'] = action
-                st.session_state['confidence'] = confidence
-                st.session_state['reason'] = reason
-                st.success("✅ Analysis complete")
+                
+                with st.spinner("جاري التحليل..."):
+                    action, confidence, reason = engine.predict(df)
+                    
+                    st.session_state['action'] = action
+                    st.session_state['confidence'] = confidence
+                    st.session_state['reason'] = reason
+                    
+                    st.success("✅ تم التحليل")
         
+        # عرض النتيجة
         if 'action' in st.session_state:
             st.divider()
             
             action = st.session_state['action']
             confidence = st.session_state.get('confidence', 0)
+            reason = st.session_state.get('reason', '')
             
             if action == "BUY":
-                st.success(f"🟢 **BUY** ({confidence}%)")
+                st.success(f"🟢 **توصية: شراء** (ثقة: {confidence}%)")
             elif action == "SELL":
-                st.error(f"🔴 **SELL** ({confidence}%)")
+                st.error(f"🔴 **توصية: بيع** (ثقة: {confidence}%)")
             else:
-                st.warning(f"⏸️ **HOLD** ({confidence}%)")
+                st.warning(f"⏸️ **توصية: انتظار** (ثقة: {confidence}%)")
             
-            st.info(st.session_state.get('reason', ''))
+            st.text_area("📝 التفاصيل:", reason, height=100)
             
             st.divider()
-            st.subheader("💼 Execution")
+            st.subheader("💼 تنفيذ الصفقة")
             
             if action == "BUY":
-                st.button(f"🚀 Buy {quantity} shares", use_container_width=True, type="primary")
+                col_b1, col_b2 = st.columns(2)
+                with col_b1:
+                    if st.button(f"🚀 شراء {quantity} سهم", use_container_width=True, type="primary"):
+                        st.info("✅ تم تنفيذ أمر الشراء (محاكاة)")
+                with col_b2:
+                    if st.button("📊 محاكاة", use_container_width=True):
+                        df = st.session_state['df']
+                        last_price = df['close'].iloc[-1]
+                        st.info(f"📊 محاكاة: شراء {quantity} سهم بسعر ${last_price:.2f}")
+            
             elif action == "SELL":
-                st.button(f"🔻 Sell {quantity} shares", use_container_width=True, type="primary")
+                col_s1, col_s2 = st.columns(2)
+                with col_s1:
+                    if st.button(f"🔻 بيع {quantity} سهم", use_container_width=True, type="primary"):
+                        st.info("✅ تم تنفيذ أمر البيع (محاكاة)")
+                with col_s2:
+                    if st.button("📊 محاكاة", use_container_width=True):
+                        df = st.session_state['df']
+                        last_price = df['close'].iloc[-1]
+                        st.info(f"📊 محاكاة: بيع {quantity} سهم بسعر ${last_price:.2f}")
+            
             else:
-                st.info("⏸️ No action")
+                st.info("⏸️ لا توجد صفقة للتنفيذ")
+                
+                # عرض تفاصيل إضافية
+                if 'df' in st.session_state:
+                    df = st.session_state['df']
+                    latest = df.iloc[-1]
+                    with st.expander("📈 تفاصيل السوق"):
+                        col_d1, col_d2 = st.columns(2)
+                        with col_d1:
+                            st.metric("RSI", f"{latest['RSI']:.1f}")
+                            st.metric("SMA 20", f"${latest['SMA_20']:.2f}")
+                        with col_d2:
+                            diff_sma = ((latest['close'] - latest['SMA_20']) / latest['SMA_20']) * 100
+                            st.metric("البعد عن SMA20", f"{diff_sma:+.1f}%")
+                            st.metric("حجم التداول", f"{latest['volume']:,.0f}")
+            
+            # زر مسح النتائج
+            if st.button("🗑️ مسح النتائج", use_container_width=True):
+                for key in ['action', 'confidence', 'reason']:
+                    st.session_state.pop(key, None)
+                st.rerun()
+    
+    # ===== معلومات إضافية =====
+    with st.expander("ℹ️ معلومات عن البوت"):
+        st.markdown("""
+        ### 🤖 بوت التداول بالذكاء الاصطناعي
+        
+        **المميزات:**
+        - 📊 **جلب البيانات**: من Yahoo Finance (مجاني وسريع)
+        - 🧠 **محرك محلي**: Random Forest Classifier مع ميزات فنية
+        - 🤖 **OpenAI**: دعم GPT-4o-mini للتحليل المتقدم (اختياري)
+        - 🔌 **IBKR**: تنفيذ الأوامر عبر Interactive Brokers (اختياري)
+        - ⭐ **قائمة مفضلة**: إدارة الأسهم المفضلة
+        - 📈 **قوائم السوق**: الأكثر ارتفاعاً/انخفاضاً
+        
+        **⚠️ تنبيهات:**
+        - هذا البوت **للأغراض التعليمية فقط**
+        - استخدم الحساب التجريبي (Paper Trading) أولاً
+        - لا تخاطر بأكثر مما يمكنك تحمل خسارته
+        - راجع أداء النموذج باستمرار
+        
+        **📚 المتطلبات:**
+        - Python 3.11+
+        - المكتبات: streamlit, pandas, numpy, plotly, yfinance, ta, scikit-learn
+        - (اختياري) IBKR: ib_async أو ib_insync
+        """)
 
+# ==========================================
+# تشغيل التطبيق
+# ==========================================
 if __name__ == "__main__":
     main()
