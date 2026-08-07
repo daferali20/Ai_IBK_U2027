@@ -6,10 +6,5 @@ openai
 scikit-learn
 python-dotenv
 ta
-ib-insync
-nest-asyncio
-xgboost
-lightgbm
-joblib
 yfinance
-asyncio
+nest-asyncio
