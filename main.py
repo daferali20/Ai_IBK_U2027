@@ -1,17 +1,11 @@
 # ==========================================
-# 1. إدارة الـ Event Loop بأمان لـ Streamlit
+# 1. إدارة الـ Event Loop بأمان عبر nest_asyncio
 # ==========================================
-import sys
-import asyncio
 import warnings
+import nest_asyncio
 
-# إعداد Event Loop نظيف للتوافق مع Streamlit و Asyncio
-try:
-    loop = asyncio.get_event_loop()
-except RuntimeError:
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
+# تفعيل nest_asyncio ليسمح بالتداخل مع Event Loop الخاص بـ Streamlit
+nest_asyncio.apply()
 warnings.filterwarnings('ignore')
 
 # ==========================================
@@ -19,6 +13,7 @@ warnings.filterwarnings('ignore')
 # ==========================================
 import random
 import time
+import sys
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -32,9 +27,9 @@ from openai import OpenAI
 # 3. استيراد IBKR بأمان
 # ==========================================
 try:
-    from ib_async import IB, Stock, MarketOrder, util
+    from ib_async import IB, Stock, MarketOrder
 except ImportError:
-    from ib_insync import IB, Stock, MarketOrder, util
+    from ib_insync import IB, Stock, MarketOrder
 
 # ==========================================
 # 4. محاكاة/استيراد النموذج المحلي
@@ -55,7 +50,7 @@ except ImportError:
             return "BUY", 85, "تقاطع إيجابي للـ RSI مع SMA"
 
 # ==========================================
-# إعدادات الصفحة
+# إعدادات الصفحة والثوابت
 # ==========================================
 st.set_page_config(
     page_title="AI Trading Bot (IBKR & Yahoo)",
@@ -63,9 +58,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# ==========================================
-# الثوابت
-# ==========================================
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7497
 DEFAULT_SYMBOL = "AAPL"
@@ -129,15 +121,12 @@ def get_market_data(symbol, period="5d", interval="5m"):
         return None, f"❌ خطأ أثناء جلب البيانات: {str(e)}"
 
 # ==========================================
-# تنفيذ أوامر IBKR المتزامنة
+# تنفيذ الأوامر عبر IBKR الآمنة
 # ==========================================
 def execute_ib_order(action, symbol, quantity, host, port):
+    """تنفيذ أمر التداول عبر IBKR دون تعطيل خادم Streamlit"""
     ib = IB()
     try:
-        # إنشاء event loop منفصل داخل الخيط لمنع التجمد
-        nest_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(nest_loop)
-        
         client_id = random.randint(1000, 9999)
         ib.connect(host, port, clientId=client_id, timeout=5)
         
@@ -334,14 +323,12 @@ def main():
         if 'df' in st.session_state:
             df = st.session_state['df']
             
-            # عرض المؤشرات السريعة
             last_price = df['close'].iloc[-1]
             prev_price = df['close'].iloc[-2] if len(df) > 1 else last_price
             change = ((last_price - prev_price) / prev_price) * 100
             
             st.metric("السعر الحالي", f"${last_price:.2f}", f"{change:+.2f}%")
             
-            # الرسم البياني
             fig = plot_chart(df, symbol)
             st.plotly_chart(fig, use_container_width=True)
             
