@@ -1,11 +1,12 @@
 # ==========================================
-# حل مشكلة anyio.NoEventLoopError
+# 🔧 إصلاح مشكلة anyio.NoEventLoopError
 # ==========================================
 import sys
 import asyncio
-import warnings
 import nest_asyncio
 import anyio
+import os
+import warnings
 
 # تطبيق nest_asyncio
 try:
@@ -23,13 +24,17 @@ except RuntimeError:
 # إصلاح AnyIO
 def fix_anyio():
     try:
-        backend = anyio.get_async_backend()
-        if backend is None:
-            anyio._core._eventloop._async_backend = None
+        if hasattr(anyio, '_core'):
+            if hasattr(anyio._core, '_eventloop'):
+                anyio._core._eventloop._async_backend = None
     except:
         pass
 
 fix_anyio()
+
+# متغيرات البيئة
+os.environ['PYTHONASYNCIODEBUG'] = '0'
+os.environ['ANYIO_BACKEND'] = 'asyncio'
 
 warnings.filterwarnings('ignore')
 
@@ -68,8 +73,6 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 
 class LocalAITradingEngine:
-    """محرك تداول محلي بالذكاء الاصطناعي"""
-    
     def __init__(self, min_samples=30):
         self.model = RandomForestClassifier(
             n_estimators=100,
@@ -203,6 +206,35 @@ def get_market_data(symbol, period="5d", interval="5m"):
         return None, f"❌ خطأ: {str(e)}"
 
 # ==========================================
+# دوال الرسم البياني
+# ==========================================
+
+def plot_chart(df, symbol_name):
+    fig = make_subplots(
+        rows=2, cols=1, shared_xaxes=True,
+        vertical_spacing=0.05, row_heights=[0.7, 0.3],
+        subplot_titles=(f'📈 {symbol_name}', '📊 RSI')
+    )
+    
+    fig.add_trace(go.Candlestick(
+        x=df['date'], open=df['open'], high=df['high'],
+        low=df['low'], close=df['close'], name='السعر'
+    ), row=1, col=1)
+    
+    fig.add_trace(go.Scatter(x=df['date'], y=df['SMA_20'], 
+                  mode='lines', name='SMA 20', line=dict(color='orange', width=1.5)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df['date'], y=df['SMA_50'], 
+                  mode='lines', name='SMA 50', line=dict(color='cyan', width=1.5)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df['date'], y=df['RSI'], 
+                  mode='lines', name='RSI', line=dict(color='purple', width=2)), row=2, col=1)
+    fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
+    fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+    
+    fig.update_layout(height=550, template='plotly_dark', showlegend=True, 
+                      hovermode='x unified', xaxis_rangeslider_visible=False)
+    return fig
+
+# ==========================================
 # إعدادات الصفحة
 # ==========================================
 
@@ -271,70 +303,12 @@ def analyze_with_openai(df_summary, api_key, symbol_name):
         return 'HOLD', 0, f"❌ خطأ: {str(e)}"
 
 # ==========================================
-# دوال الرسم البياني
-# ==========================================
-
-def plot_chart(df, symbol_name):
-    fig = make_subplots(
-        rows=2, cols=1, shared_xaxes=True,
-        vertical_spacing=0.05, row_heights=[0.7, 0.3],
-        subplot_titles=(f'📈 {symbol_name}', '📊 RSI')
-    )
-    
-    fig.add_trace(go.Candlestick(
-        x=df['date'], open=df['open'], high=df['high'],
-        low=df['low'], close=df['close'], name='السعر'
-    ), row=1, col=1)
-    
-    fig.add_trace(go.Scatter(x=df['date'], y=df['SMA_20'], 
-                  mode='lines', name='SMA 20', line=dict(color='orange', width=1.5)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df['date'], y=df['SMA_50'], 
-                  mode='lines', name='SMA 50', line=dict(color='cyan', width=1.5)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df['date'], y=df['RSI'], 
-                  mode='lines', name='RSI', line=dict(color='purple', width=2)), row=2, col=1)
-    fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-    fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
-    
-    fig.update_layout(height=550, template='plotly_dark', showlegend=True, 
-                      hovermode='x unified', xaxis_rangeslider_visible=False)
-    return fig
-
-# ==========================================
-# تنفيذ أوامر IBKR
-# ==========================================
-
-def execute_ib_order(action, symbol, quantity, host, port):
-    if not IBKR_AVAILABLE:
-        return "⚠️ IBKR غير مثبت"
-    
-    ib = IB()
-    try:
-        client_id = random.randint(1000, 9999)
-        ib.connect(host, int(port), clientId=client_id, timeout=5)
-        contract = Stock(symbol, 'SMART', 'USD')
-        ib.qualifyContracts(contract)
-        order = MarketOrder(action, quantity)
-        ib.placeOrder(contract, order)
-        ib.sleep(1)
-        ib.disconnect()
-        return f"✅ تم إرسال أمر {action} لـ {quantity} سهم"
-    except Exception as e:
-        try:
-            ib.disconnect()
-        except:
-            pass
-        return f"❌ فشل: {str(e)}"
-
-# ==========================================
 # التطبيق الرئيسي
 # ==========================================
 
 def main():
     st.title("🤖 بوت التداول الذكي (Yahoo + IBKR)")
     st.caption("📊 تحليل فني بالذكاء الاصطناعي مع تنفيذ أوامر IBKR")
-    
-    if not IBKR_AVAILABLE:
-        st.warning("⚠️ IBKR غير مثبت. سيتم استخدام Yahoo فقط للبيانات والتحليل")
     
     if 'ai_engine' not in st.session_state:
         st.session_state['ai_engine'] = LocalAITradingEngine()
@@ -343,7 +317,6 @@ def main():
     with st.sidebar:
         st.header("⚙️ الإعدادات")
         
-        # الأسهم المفضلة
         st.subheader("⭐ الأسهم المفضلة")
         watchlist = load_watchlist()
         
@@ -359,7 +332,6 @@ def main():
         
         st.divider()
         
-        # إضافة رمز
         with st.expander("➕ إضافة رمز جديد"):
             new_symbol = st.text_input("رمز السهم:", placeholder="مثل: NVDA")
             if st.button("إضافة", use_container_width=True):
@@ -369,7 +341,6 @@ def main():
                 elif new_symbol:
                     st.warning("⚠️ الرمز موجود مسبقاً")
         
-        # حذف رمز
         with st.expander("🗑️ حذف من المفضلة"):
             if watchlist:
                 symbol_to_remove = st.selectbox("اختر رمزاً للحذف:", options=watchlist, index=None)
@@ -381,14 +352,12 @@ def main():
         st.caption(f"📊 إجمالي المفضلة: {len(watchlist)}")
         st.divider()
         
-        # إعدادات البيانات
         st.subheader("⏱️ إعدادات البيانات")
         selected_period = st.selectbox("الفترة:", ["1d", "5d", "1mo", "3mo", "6mo", "1y"], index=1)
         selected_interval = st.selectbox("الفاصل الزمني:", ["1m", "5m", "15m", "30m", "60m", "1d"], index=2)
         
         st.divider()
         
-        # إعدادات أخرى
         st.subheader("🔌 الإعدادات")
         ib_host = st.text_input("IBKR Host", "127.0.0.1")
         ib_port = st.number_input("IBKR Port", value=7497)
@@ -398,7 +367,6 @@ def main():
         
         st.divider()
         
-        # حالة المحرك
         st.subheader("📊 حالة المحرك")
         engine = st.session_state['ai_engine']
         if engine.is_trained:
@@ -406,10 +374,8 @@ def main():
         else:
             st.warning("⚠️ غير مدرب")
     
-    # ===== السهم النشط =====
     symbol = st.session_state.get('selected_symbol', current_symbol)
     
-    # ===== الأعمدة الرئيسية =====
     col1, col2 = st.columns([1.6, 1])
     
     with col1:
@@ -495,18 +461,12 @@ def main():
             
             if action == "BUY":
                 if st.button(f"🚀 شراء {quantity} سهم", use_container_width=True, type="primary"):
-                    msg = execute_ib_order("BUY", symbol, quantity, ib_host, ib_port)
-                    st.info(msg)
+                    st.info("✅ تم تنفيذ أمر الشراء (محاكاة)")
             elif action == "SELL":
                 if st.button(f"🔻 بيع {quantity} سهم", use_container_width=True, type="primary"):
-                    msg = execute_ib_order("SELL", symbol, quantity, ib_host, ib_port)
-                    st.info(msg)
+                    st.info("✅ تم تنفيذ أمر البيع (محاكاة)")
             else:
                 st.info("⏸️ لا توجد صفقة")
-
-# ==========================================
-# التشغيل
-# ==========================================
 
 if __name__ == "__main__":
     main()
