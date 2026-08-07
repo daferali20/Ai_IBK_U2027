@@ -28,15 +28,14 @@ except ImportError:
         IB = None
 
 # ==========================================
-# 3. محاكاة/استيراد النموذج المحلي
+# 3. استيراد/محاكاة النموذج المحلي
 # ==========================================
 try:
     from models.base_model import LocalAITradingEngine
-except ImportError:
+except Exception:
     class LocalAITradingEngine:
         def __init__(self):
             self.is_trained = False
-            self.feature_importance = None
             
         def train_quick_model(self, df):
             self.is_trained = True
@@ -82,15 +81,15 @@ def remove_from_watchlist(symbol):
     return False
 
 # ==========================================
-# جلب بيانات السوق
+# جلب بيانات السوق وتنظيفها
 # ==========================================
 def get_market_data(symbol, period="5d", interval="5m"):
     try:
         ticker = yf.Ticker(symbol)
         df = ticker.history(period=period, interval=interval)
         
-        if df.empty:
-            return None, f"❌ لا توجد بيانات للرمز: {symbol}"
+        if df.empty or len(df) < 20:
+            return None, f"❌ البيانات غير كافية للرمز: {symbol}"
         
         df.rename(columns={
             'Open': 'open',
@@ -100,7 +99,6 @@ def get_market_data(symbol, period="5d", interval="5m"):
             'Volume': 'volume'
         }, inplace=True)
         
-        # معالجة المنطقة الزمنية
         df.index = df.index.tz_localize(None)
         df['date'] = df.index
         
@@ -110,19 +108,24 @@ def get_market_data(symbol, period="5d", interval="5m"):
         df['SMA_50'] = ta.trend.sma_indicator(df['close'], window=50)
         df['volume_ma'] = ta.trend.sma_indicator(df['volume'], window=10)
         
-        df.dropna(subset=['RSI', 'SMA_20'], inplace=True)
+        # تنظيف القيم الفارغة الناتجة عن حساب المؤشرات
+        df.dropna(inplace=True)
+        df.reset_index(drop=True, inplace=True)
+        
+        if df.empty:
+            return None, f"❌ لا توجد بيانات كافية بعد حساب المؤشرات الفنية."
+            
         return df, None
         
     except Exception as e:
         return None, f"❌ خطأ أثناء جلب البيانات: {str(e)}"
 
 # ==========================================
-# تنفيذ الأوامر عبر IBKR الآمنة
+# تنفيذ الأوامر عبر IBKR
 # ==========================================
 def execute_ib_order(action, symbol, quantity, host, port):
-    """تنفيذ أمر التداول عبر IBKR بأمان"""
     if IB is None:
-        return "❌ مكتبة ib_async أو ib_insync غير مثبته."
+        return "❌ مكتبة ib_async غير مثبته."
         
     ib = IB()
     try:
@@ -144,15 +147,19 @@ def execute_ib_order(action, symbol, quantity, host, port):
         return f"❌ فشل تنفيذ الأمر عبر IBKR: {str(e)}"
 
 # ==========================================
-# التحليل المالي والرسوم البيانية
+# التحليل المالي آمن الخطأ
 # ==========================================
 def analyze_with_local_ai(df):
     engine = st.session_state['ai_engine']
-    if not engine.is_trained:
-        with st.spinner("تدريب النموذج..."):
+    try:
+        if not getattr(engine, 'is_trained', False):
             engine.train_quick_model(df)
-    
-    action, confidence, reason = engine.predict_opportunity(df)
+        action, confidence, reason = engine.predict_opportunity(df)
+    except Exception as e:
+        # استجابة احتياطية في حال فشل النموذج المحلي
+        action, confidence = "HOLD", 50
+        reason = f"تعذر التحليل عبر النموذج المحلي ({str(e)})"
+        
     result = f"[RECOMMENDATION: {action}]\nالثقة: {confidence}%\nالسبب: {reason}\n"
     return result, action, confidence
 
@@ -315,8 +322,14 @@ def main():
                     st.error(error)
                 else:
                     st.session_state['df'] = df
-                    engine = st.session_state['ai_engine']
-                    engine.train_quick_model(df)
+                    
+                    # تدريب النموج بحماية ضد الأخطاء
+                    try:
+                        engine = st.session_state['ai_engine']
+                        engine.train_quick_model(df)
+                    except Exception as train_err:
+                        st.warning(f"⚠️ تنبيه: لم يتم تحديث النموذج المحلي ({train_err})")
+                        
                     st.success(f"✅ تم تحديث {len(df)} شمعة بنجاح")
 
         if 'df' in st.session_state:
