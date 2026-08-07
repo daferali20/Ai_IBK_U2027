@@ -53,7 +53,7 @@ except ImportError:
 # إعدادات الصفحة والثوابت
 # ==========================================
 st.set_page_config(
-    page_title="AI Trading Bot (IBKR & Yahoo)",
+    page_title="AI Trading Bot (Yahoo & IBKR)",
     page_icon="🤖",
     layout="wide"
 )
@@ -86,8 +86,56 @@ def remove_from_watchlist(symbol):
     return False
 
 # ==========================================
-# جلب بيانات السوق
+# جلب الأسهم الرائجة من Yahoo Finance
 # ==========================================
+
+def get_trending_stocks_yahoo(limit=10):
+    """جلب الأسهم الأكثر تداولاً من Yahoo Finance"""
+    try:
+        symbols = ['AAPL', 'GOOGL', 'MSFT', 'AMZN', 'TSLA', 
+                   'NVDA', 'META', 'NFLX', 'JPM', 'VTI',
+                   'SPY', 'QQQ', 'AMD', 'INTC', 'PYPL']
+        
+        trending = []
+        for symbol in symbols:
+            try:
+                ticker = yf.Ticker(symbol)
+                info = ticker.info
+                trending.append({
+                    'symbol': symbol,
+                    'name': info.get('longName', symbol)[:20],
+                    'price': info.get('regularMarketPrice', 0),
+                    'change': info.get('regularMarketChangePercent', 0),
+                    'volume': info.get('regularMarketVolume', 0)
+                })
+            except:
+                continue
+        
+        trending.sort(key=lambda x: abs(x['change']), reverse=True)
+        return trending[:limit]
+        
+    except Exception as e:
+        print(f"❌ خطأ Yahoo Finance: {e}")
+        return []
+
+def get_top_gainers_yahoo(limit=10):
+    """جلب الأسهم الأكثر ارتفاعاً"""
+    stocks = get_trending_stocks_yahoo(limit*2)
+    gainers = [s for s in stocks if s['change'] > 0]
+    gainers.sort(key=lambda x: x['change'], reverse=True)
+    return gainers[:limit]
+
+def get_top_losers_yahoo(limit=10):
+    """جلب الأسهم الأكثر انخفاضاً"""
+    stocks = get_trending_stocks_yahoo(limit*2)
+    losers = [s for s in stocks if s['change'] < 0]
+    losers.sort(key=lambda x: x['change'])
+    return losers[:limit]
+
+# ==========================================
+# جلب بيانات السوق من Yahoo
+# ==========================================
+
 def get_market_data(symbol, period="5d", interval="5m"):
     try:
         ticker = yf.Ticker(symbol)
@@ -123,6 +171,7 @@ def get_market_data(symbol, period="5d", interval="5m"):
 # ==========================================
 # تنفيذ الأوامر عبر IBKR الآمنة
 # ==========================================
+
 def execute_ib_order(action, symbol, quantity, host, port):
     """تنفيذ أمر التداول عبر IBKR دون تعطيل خادم Streamlit"""
     ib = IB()
@@ -147,6 +196,7 @@ def execute_ib_order(action, symbol, quantity, host, port):
 # ==========================================
 # التحليل المالي والرسوم البيانية
 # ==========================================
+
 def analyze_with_local_ai(df):
     engine = st.session_state['ai_engine']
     if not engine.is_trained:
@@ -243,6 +293,7 @@ def plot_chart(df, symbol_name):
 # ==========================================
 # التطبيق الرئيسي
 # ==========================================
+
 def main():
     st.title("🤖 بوت التداول الذكي (Yahoo & IBKR)")
     
@@ -286,6 +337,64 @@ def main():
                         st.rerun()
                         
         st.caption(f"📊 إجمالي المفضلة: {len(watchlist)}")
+        st.divider()
+        
+        # ===== قوائم السوق من Yahoo =====
+        st.subheader("📊 قوائم السوق")
+        
+        col_g1, col_g2 = st.columns(2)
+        
+        with col_g1:
+            if st.button("🔥 الأكثر ارتفاعاً", use_container_width=True):
+                with st.spinner("جاري جلب البيانات..."):
+                    gainers = get_top_gainers_yahoo(10)
+                    if gainers:
+                        st.session_state['market_gainers'] = gainers
+                        st.success(f"✅ تم جلب {len(gainers)} سهم")
+                    else:
+                        st.error("❌ فشل جلب البيانات")
+        
+        with col_g2:
+            if st.button("📉 الأكثر انخفاضاً", use_container_width=True):
+                with st.spinner("جاري جلب البيانات..."):
+                    losers = get_top_losers_yahoo(10)
+                    if losers:
+                        st.session_state['market_losers'] = losers
+                        st.success(f"✅ تم جلب {len(losers)} سهم")
+                    else:
+                        st.error("❌ فشل جلب البيانات")
+        
+        # عرض النتائج
+        if 'market_gainers' in st.session_state:
+            st.divider()
+            st.subheader("🔥 الأكثر ارتفاعاً")
+            for item in st.session_state['market_gainers'][:10]:
+                col_sym, col_chg, col_add = st.columns([2, 1, 1])
+                with col_sym:
+                    st.write(f"• {item['symbol']}")
+                with col_chg:
+                    st.write(f"🟢 +{item['change']:.1f}%")
+                with col_add:
+                    if st.button("➕", key=f"add_g_{item['symbol']}"):
+                        if add_to_watchlist(item['symbol']):
+                            st.success(f"✅ تم إضافة {item['symbol']}")
+                            st.rerun()
+        
+        if 'market_losers' in st.session_state:
+            st.divider()
+            st.subheader("📉 الأكثر انخفاضاً")
+            for item in st.session_state['market_losers'][:10]:
+                col_sym, col_chg, col_add = st.columns([2, 1, 1])
+                with col_sym:
+                    st.write(f"• {item['symbol']}")
+                with col_chg:
+                    st.write(f"🔴 {item['change']:.1f}%")
+                with col_add:
+                    if st.button("➕", key=f"add_l_{item['symbol']}"):
+                        if add_to_watchlist(item['symbol']):
+                            st.success(f"✅ تم إضافة {item['symbol']}")
+                            st.rerun()
+        
         st.divider()
         
         st.subheader("⏱️ إعدادات البيانات")
