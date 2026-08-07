@@ -6,15 +6,50 @@ import asyncio
 import warnings
 import nest_asyncio
 
-# تطبيق nest_asyncio
-nest_asyncio.apply()
+import random
 
-# إنشاء event loop
-try:
-    loop = asyncio.get_event_loop()
-except RuntimeError:
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+def get_market_data(symbol, host, port):
+    """جلب البيانات من IBKR - نسخة آمنة مع Streamlit"""
+    # استخدام loop الفرعي الخاص بـ ib_insync بدلاً من nest_asyncio اليدوي
+    util.startLoop() 
+    ib = IB()
+    client_id = random.randint(1000, 9999) # clientId عشوائي لتجنب التضارب
+    
+    try:
+        print(f"🔄 محاولة الاتصال بـ {host}:{port} (ID: {client_id})...")
+        ib.connect(host, int(port), clientId=client_id, timeout=10)
+        
+        contract = Stock(symbol, 'SMART', 'USD')
+        
+        bars = ib.reqHistoricalData(
+            contract,
+            endDateTime='',
+            durationStr='2 D',
+            barSizeSetting='5 mins',
+            whatToShow='TRADES',
+            useRTH=True
+        )
+        
+        df = util.df(bars)
+        
+        if df is None or df.empty:
+            ib.disconnect()
+            return None, "❌ لا توجد بيانات للرمز المحدد"
+            
+        # حساب المؤشرات
+        df['RSI'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
+        df['SMA_20'] = ta.trend.sma_indicator(df['close'], window=20)
+        df['SMA_50'] = ta.trend.sma_indicator(df['close'], window=50)
+        df['volume_ma'] = ta.trend.sma_indicator(df['volume'], window=10)
+        df['date'] = df.index
+        
+        ib.disconnect()
+        return df, None
+        
+    except Exception as e:
+        if ib.isConnected():
+            ib.disconnect()
+        return None, f"❌ خطأ في الاتصال: {str(e)[:150]}"
 
 warnings.filterwarnings('ignore')
 
