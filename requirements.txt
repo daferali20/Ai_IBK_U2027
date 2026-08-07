@@ -5,4 +5,5 @@ plotly
 yfinance
 ta
 scikit-learn
-nest-asyncio
+openai
+nest_asyncio
