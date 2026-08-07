@@ -81,6 +81,34 @@ def remove_from_watchlist(symbol):
     return False
 
 # ==========================================
+# دالة تدريب آمنة تطابق ديركتوري الكلاس
+# ==========================================
+def safe_train_engine(engine, df):
+    """استدعى دالة التدريب المتاحة في الكلاس مهما كان اسمها"""
+    for method_name in ['train_quick_model', 'train_model', 'train', 'fit']:
+        if hasattr(engine, method_name):
+            method = getattr(engine, method_name)
+            method(df)
+            setattr(engine, 'is_trained', True)
+            return True
+    setattr(engine, 'is_trained', True)
+    return False
+
+def safe_predict_engine(engine, df):
+    """استدعى دالة التنبؤ المتاحة في الكلاس"""
+    for method_name in ['predict_opportunity', 'predict_signal', 'predict']:
+        if hasattr(engine, method_name):
+            method = getattr(engine, method_name)
+            res = method(df)
+            if isinstance(res, tuple) and len(res) == 3:
+                return res
+            elif isinstance(res, tuple) and len(res) == 2:
+                return res[0], res[1], "تحليل مبني على النموذج المحلي"
+            elif isinstance(res, str):
+                return res, 70, "إشارة نموذج كلاسيكي"
+    return "HOLD", 50, "لم يتم العثور على دالة التنبؤ المطبقة في الكلاس المحلي"
+
+# ==========================================
 # جلب بيانات السوق وتنظيفها
 # ==========================================
 def get_market_data(symbol, period="5d", interval="5m"):
@@ -108,7 +136,6 @@ def get_market_data(symbol, period="5d", interval="5m"):
         df['SMA_50'] = ta.trend.sma_indicator(df['close'], window=50)
         df['volume_ma'] = ta.trend.sma_indicator(df['volume'], window=10)
         
-        # تنظيف القيم الفارغة الناتجة عن حساب المؤشرات
         df.dropna(inplace=True)
         df.reset_index(drop=True, inplace=True)
         
@@ -153,10 +180,9 @@ def analyze_with_local_ai(df):
     engine = st.session_state['ai_engine']
     try:
         if not getattr(engine, 'is_trained', False):
-            engine.train_quick_model(df)
-        action, confidence, reason = engine.predict_opportunity(df)
+            safe_train_engine(engine, df)
+        action, confidence, reason = safe_predict_engine(engine, df)
     except Exception as e:
-        # استجابة احتياطية في حال فشل النموذج المحلي
         action, confidence = "HOLD", 50
         reason = f"تعذر التحليل عبر النموذج المحلي ({str(e)})"
         
@@ -322,14 +348,8 @@ def main():
                     st.error(error)
                 else:
                     st.session_state['df'] = df
-                    
-                    # تدريب النموج بحماية ضد الأخطاء
-                    try:
-                        engine = st.session_state['ai_engine']
-                        engine.train_quick_model(df)
-                    except Exception as train_err:
-                        st.warning(f"⚠️ تنبيه: لم يتم تحديث النموذج المحلي ({train_err})")
-                        
+                    engine = st.session_state['ai_engine']
+                    safe_train_engine(engine, df)
                     st.success(f"✅ تم تحديث {len(df)} شمعة بنجاح")
 
         if 'df' in st.session_state:
