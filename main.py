@@ -16,7 +16,7 @@ from openai import OpenAI
 warnings.filterwarnings('ignore')
 
 # 🤖 محرك الذكاء الاصطناعي المحلي
-from ai_models import LocalAITradingEngine
+#from ai_models import LocalAITradingEngine
 
 # ==========================================
 # إعدادات Streamlit
