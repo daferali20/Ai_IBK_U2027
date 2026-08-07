@@ -2,8 +2,7 @@ streamlit
 pandas
 numpy
 plotly
-yfinance
 ta
-scikit-learn
+yfinance
 openai
-nest_asyncio
+ib-async
