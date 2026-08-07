@@ -4,7 +4,7 @@
 import sys
 import asyncio
 import warnings
-
+import yfinance as yf
 # إنشاء Event Loop وضبطه للـ Policy مباشرة قبل أي import
 try:
     loop = asyncio.get_running_loop()
@@ -98,74 +98,43 @@ def remove_from_watchlist(symbol):
 # دوال IBKR المعدلة بأمان للـ Threading
 # ==========================================
 
-def get_market_data(symbol, host, port):
-    """جلب البيانات من IBKR بأمان"""
-    ib = IB()
-    client_id = random.randint(1000, 9999) # توليد ID عشوائي لتجنب التضارب
-    
+def get_market_data(symbol, period="5d", interval="5m"):
+    """جلب البيانات الفنية مجاناً من Yahoo Finance"""
     try:
-        print(f"🔄 محاولة الاتصال بـ {host}:{port} (ClientID: {client_id})...")
-        ib.connect(host, int(port), clientId=client_id, timeout=10)
+        print(f"🔄 جلب بيانات {symbol} من Yahoo Finance...")
         
-        contract = Stock(symbol, 'SMART', 'USD')
+        # تحميل البيانات مباشرة
+        ticker = yf.Ticker(symbol)
+        df = ticker.history(period=period, interval=interval)
         
-        bars = ib.reqHistoricalData(
-            contract,
-            endDateTime='',
-            durationStr='2 D',
-            barSizeSetting='5 mins',
-            whatToShow='TRADES',
-            useRTH=True
-        )
+        if df.empty:
+            return None, f"❌ لا توجد بيانات للرمز: {symbol}"
         
-        df = util.df(bars)
-        ib.disconnect()
+        # توحيد أسماء الأعمدة لتتناسب مع باقي الكود (أحرف صغيرة)
+        df.rename(columns={
+            'Open': 'open',
+            'High': 'high',
+            'Low': 'low',
+            'Close': 'close',
+            'Volume': 'volume'
+        }, inplace=True)
         
-        if df is None or df.empty:
-            return None, "❌ لا توجد بيانات للرمز المحدد"
+        # إعداد عمود التاريخ
+        df['date'] = df.index
         
         # حساب المؤشرات الفنية
         df['RSI'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
         df['SMA_20'] = ta.trend.sma_indicator(df['close'], window=20)
         df['SMA_50'] = ta.trend.sma_indicator(df['close'], window=50)
         df['volume_ma'] = ta.trend.sma_indicator(df['volume'], window=10)
-        df['date'] = df.index
+        
+        # حذف الصفوف التي تحتوي على قيم فارغة بسبب حساب المتوسطات
+        df.dropna(subset=['RSI', 'SMA_20'], inplace=True)
         
         return df, None
         
     except Exception as e:
-        if ib.isConnected():
-            ib.disconnect()
-        
-        error_msg = str(e)
-        if "Connect call failed" in error_msg or "Connection refused" in error_msg:
-            return None, "❌ لا يمكن الاتصال بـ IBKR.\n\nتأكد من:\n1. تشغيل TWS أو IB Gateway\n2. تمكين API في الإعدادات\n3. استخدام Port صحيح (7497 للـ Paper trading أو 7496 للحقيقي)"
-        else:
-            return None, f"❌ خطأ: {error_msg[:200]}"
-
-def execute_ib_order(action, symbol, qty, host, port):
-    """تنفيذ أمر تداول"""
-    ib = IB()
-    client_id = random.randint(1000, 9999)
-    try:
-        ib.connect(host, int(port), clientId=client_id, timeout=10)
-        contract = Stock(symbol, 'SMART', 'USD')
-        order = MarketOrder(action, qty)
-        trade = ib.placeOrder(contract, order)
-        ib.sleep(2)
-        
-        status = trade.orderStatus.status
-        ib.disconnect()
-        
-        if status in ['Filled', 'Submitted']:
-            return f"✅ تم تنفيذ أمر {action} بنجاح!"
-        else:
-            return f"⚠️ الحالة: {status}"
-            
-    except Exception as e:
-        if ib.isConnected():
-            ib.disconnect()
-        return f"❌ خطأ: {e}"
+        return None, f"❌ خطأ أثناء جلب البيانات من ياهو: {str(e)}"
 
 # ==========================================
 # دوال التحليل الرسم البياني
