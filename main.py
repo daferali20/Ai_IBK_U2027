@@ -11,12 +11,12 @@ import ta
 from openai import OpenAI
 
 # 1. استخدام المكتبة الحديثة ib_async وإلغاء nest_asyncio تماماً
-#from ib_async import IB, Stock, MarketOrder, util
+from ib_async import IB, Stock, MarketOrder, util
 
 warnings.filterwarnings('ignore')
 
 # 🤖 محرك الذكاء الاصطناعي المحلي
-#from ai_models import LocalAITradingEngine
+from ai_models import LocalAITradingEngine
 
 # ==========================================
 # إعدادات Streamlit
